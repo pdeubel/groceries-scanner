@@ -1,5 +1,12 @@
 # IPython
 .ipynb_checkpoints/
+Untitled.ipynb
+
+# IDE
+.idea/
 
 # Dataset
 freiburg_groceries_dataset/
+
+# Misc
+Notes.md
