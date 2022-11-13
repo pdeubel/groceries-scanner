@@ -1,0 +1,24 @@
+entity: pdeubel
+project: GroceriesScanner
+program: train.py
+method: grid
+metric:
+  name: fold_val_accuracy
+  goal: maximize
+parameters:
+  img_size:
+    value: [256, 256]
+  model:
+    values: ["mobilenet_v2", "mobilenet_v3"]
+  batch_size:
+    values: [16, 32, 64]
+  lr:
+    values: [0.01, 0.001, 0.0001]
+  optimizer:
+    value: "adam"
+  dropout:
+    value: true
+  dropout_prob:
+    values: [0.05, 0.2, 0.4]
+  epochs:
+    value: 30

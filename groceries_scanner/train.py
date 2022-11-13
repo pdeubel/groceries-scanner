@@ -97,170 +97,122 @@ def train(X_train_fold_list, X_test_fold_list, y_train_fold_list, y_test_fold_li
     :return:
     """
 
-    img_width = 256
-    img_height = 256
+    run = wandb.init(dir="wandb_metadata")
 
-    training_config = [
-        {
-            "model": ["mobilenet_v2", "mobilenet_v3"],
-            "batch_size": [16, 32, 64],
-            "lr": [0.01, 0.001, 0.0001],
-            "optimizer": ["adam"],
-            "dropout": [True],
-            "dropout_prob": [0.05, 0.2, 0.4],
-            "epochs": [10, 20]
-        },
-        {
-            "model": ["mobilenet_v2", "mobilenet_v3"],
-            "batch_size": [16, 32, 64],
-            "lr": [0.01, 0.001, 0.0001],
-            "optimizer": ["adam"],
-            "dropout": [False],
-            "dropout_prob": [0.0],
-            "epochs": [10, 20]
-        }
-    ]
+    img_width = wandb.config.img_size[0]
+    img_height = wandb.config.img_size[1]
 
-    """
-    model.fit -> need model
-    learning rate
-    optimizer
-    epochs
-    model structures -> possible in model already
-    metrics
+    chosen_model = wandb.config.model
+    batch_size = wandb.config.batch_size
+    lr = wandb.config.lr
+    chosen_optimizer = wandb.config.optimizer
 
-    """
+    use_dropout = wandb.config.dropout
+    dropout_prob = None
+    if use_dropout:
+        dropout_prob = wandb.config.dropout_prob
 
-    training_results = []
+    epochs = wandb.config.epochs
 
-    for hparam_setting in ParameterGrid(training_config):
-        chosen_model = hparam_setting["model"]
-        batch_size = hparam_setting["batch_size"]
-        lr = hparam_setting["lr"]
-        chosen_optimizer = hparam_setting["optimizer"]
+    if chosen_model == "mobilenet_v2":
+        preprocess_input = tf.keras.applications.mobilenet_v2.preprocess_input
 
-        use_dropout = hparam_setting["dropout"]
-        dropout_prob = None
-        if use_dropout:
-            dropout_prob = hparam_setting["dropout_prob"]
+        base_model = tf.keras.applications.MobileNetV2(input_shape=(img_width, img_height, 3),
+                                                       include_top=False,
+                                                       weights="imagenet")
+    elif chosen_model == "mobilenet_v3":
+        preprocess_input = tf.keras.applications.mobilenet_v3.preprocess_input
 
-        epochs = hparam_setting["epochs"]
+        base_model = tf.keras.applications.MobileNetV3Small(input_shape=(img_width, img_height, 3),
+                                                            include_top=False,
+                                                            weights="imagenet")
+    else:
+        raise RuntimeError(f"Model '{chosen_model}' not supported")
 
-        if chosen_model == "mobilenet_v2":
-            preprocess_input = tf.keras.applications.mobilenet_v2.preprocess_input
+    base_model.trainable = False
 
-            base_model = tf.keras.applications.MobileNetV2(input_shape=(img_width, img_height, 3),
-                                                           include_top=False,
-                                                           weights="imagenet")
-        elif chosen_model == "mobilenet_v3":
-            preprocess_input = tf.keras.applications.mobilenet_v3.preprocess_input
+    prediction_layer = tf.keras.layers.Dense(num_classes)
 
-            base_model = tf.keras.applications.MobileNetV3Small(input_shape=(img_width, img_height, 3),
-                                                                include_top=False,
-                                                                weights="imagenet")
+    inputs = tf.keras.Input(shape=(img_width, img_height, 3))
+    x = preprocess_input(inputs)
+    x = base_model(x, training=False)
+    x = tf.keras.layers.GlobalAveragePooling2D()(x)
+
+    if use_dropout:
+        x = tf.keras.layers.Dropout(dropout_prob)(x)
+
+    x = prediction_layer(x)
+    outputs = tf.keras.layers.Softmax()(x)
+
+    model_of_fold = tf.keras.Model(inputs, outputs)
+
+    datasets = create_tf_datasets_from_splits(
+        X_train_fold_list,
+        X_test_fold_list,
+        y_train_fold_list,
+        y_test_fold_list,
+        img_height, img_width, num_classes, batch_size)
+
+    histories = []
+
+    accuracies_per_fold = []
+    val_accuracies_per_fold = []
+    losses_per_fold = []
+    val_losses_per_fold = []
+
+    for i, (train_ds_fold, val_ds_fold) in enumerate(datasets):
+        model = tf.keras.models.clone_model(model_of_fold)
+        model.set_weights(model_of_fold.get_weights())
+
+        if chosen_optimizer == "adam":
+            optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
         else:
-            raise RuntimeError(f"Model '{chosen_model}' not supported")
+            raise RuntimeError(f"Optimizer '{chosen_optimizer}' not supported")
 
-        base_model.trainable = False
+        model.compile(optimizer=optimizer,
+                      loss=tf.keras.losses.CategoricalCrossentropy(from_logits=False),
+                      metrics=["accuracy"])
 
-        prediction_layer = tf.keras.layers.Dense(num_classes)
+        history = model.fit(
+            train_ds_fold,
+            epochs=epochs,
+            validation_data=val_ds_fold)
 
-        inputs = tf.keras.Input(shape=(img_width, img_height, 3))
-        x = preprocess_input(inputs)
-        x = base_model(x, training=False)
-        x = tf.keras.layers.GlobalAveragePooling2D()(x)
+        histories.append(history)
 
-        if use_dropout:
-            x = tf.keras.layers.Dropout(dropout_prob)(x)
+        _accuracies = history.history["accuracy"]
+        _val_accuracies = history.history["val_accuracy"]
+        _losses = history.history["loss"]
+        _val_losses = history.history["val_loss"]
 
-        x = prediction_layer(x)
-        outputs = tf.keras.layers.Softmax()(x)
+        accuracies_per_fold.append(_accuracies)
+        val_accuracies_per_fold.append(_val_accuracies)
+        losses_per_fold.append(_losses)
+        val_losses_per_fold.append(_val_losses)
 
-        model_of_fold = tf.keras.Model(inputs, outputs)
-
-        datasets = create_tf_datasets_from_splits(
-            X_train_fold_list,
-            X_test_fold_list,
-            y_train_fold_list,
-            y_test_fold_list,
-            img_height, img_width, num_classes, batch_size)
-
-        run = wandb.init(
-            project="GroceriesScanner",
-            config=hparam_setting,
-            dir="wandb_metadata"
-        )
-
-        histories = []
-
-        accuracies_per_fold = []
-        val_accuracies_per_fold = []
-        losses_per_fold = []
-        val_losses_per_fold = []
-
-        for i, (train_ds_fold, val_ds_fold) in enumerate(datasets):
-            model = tf.keras.models.clone_model(model_of_fold)
-            model.set_weights(model_of_fold.get_weights())
-
-            if chosen_optimizer == "adam":
-                optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
-            else:
-                raise RuntimeError(f"Optimizer '{chosen_optimizer}' not supported")
-
-            model.compile(optimizer=optimizer,
-                          loss=tf.keras.losses.CategoricalCrossentropy(from_logits=False),
-                          metrics=["accuracy"])
-
-            history = model.fit(
-                train_ds_fold,
-                epochs=epochs,
-                validation_data=val_ds_fold)
-
-            histories.append(history)
-
-            _accuracies = history.history["accuracy"]
-            _val_accuracies = history.history["val_accuracy"]
-            _losses = history.history["loss"]
-            _val_losses = history.history["val_loss"]
-
-            accuracies_per_fold.append(_accuracies)
-            val_accuracies_per_fold.append(_val_accuracies)
-            losses_per_fold.append(_losses)
-            val_losses_per_fold.append(_val_losses)
-
-            for _acc, _val_acc, _loss, _val_loss in zip(_accuracies, _val_accuracies, _losses, _val_losses):
-                wandb.log({
-                    f"accuracy_{i}": _acc,
-                    f"val_accuracy_{i}": _val_acc,
-                    f"loss_{i}": _loss,
-                    f"val_loss_{i}": _val_loss,
-                })
-
-        mean_accuracy_per_fold = np.mean(accuracies_per_fold, axis=0)
-        mean_val_accuracy_per_fold = np.mean(val_accuracies_per_fold, axis=0)
-        mean_loss_per_fold = np.mean(losses_per_fold, axis=0)
-        mean_val_loss_per_fold = np.mean(val_losses_per_fold, axis=0)
-
-        for _acc, _val_acc, _loss, _val_loss in zip(
-                mean_accuracy_per_fold, mean_val_accuracy_per_fold, mean_loss_per_fold, mean_val_loss_per_fold):
+        for _acc, _val_acc, _loss, _val_loss in zip(_accuracies, _val_accuracies, _losses, _val_losses):
             wandb.log({
-                "fold_accuracy": _acc,
-                "fold_val_accuracy": _val_acc,
-                "fold_loss": _loss,
-                "fold_val_loss": _val_loss,
+                f"accuracy_{i}": _acc,
+                f"val_accuracy_{i}": _val_acc,
+                f"loss_{i}": _loss,
+                f"val_loss_{i}": _val_loss,
             })
 
-        training_results.append(
-            (
-                hparam_setting, histories,
-                mean_accuracy_per_fold[-1], mean_val_accuracy_per_fold[-1],
-                mean_loss_per_fold[-1], mean_val_loss_per_fold[-1]
-            )
-        )
+    mean_accuracy_per_fold = np.mean(accuracies_per_fold, axis=0)
+    mean_val_accuracy_per_fold = np.mean(val_accuracies_per_fold, axis=0)
+    mean_loss_per_fold = np.mean(losses_per_fold, axis=0)
+    mean_val_loss_per_fold = np.mean(val_losses_per_fold, axis=0)
 
-        run.finish()
+    for _acc, _val_acc, _loss, _val_loss in zip(
+            mean_accuracy_per_fold, mean_val_accuracy_per_fold, mean_loss_per_fold, mean_val_loss_per_fold):
+        wandb.log({
+            "fold_accuracy": _acc,
+            "fold_val_accuracy": _val_acc,
+            "fold_loss": _loss,
+            "fold_val_loss": _val_loss,
+        })
 
-    return training_results
+    run.finish()
 
 
 def main():
