@@ -193,6 +193,11 @@ def train(X_train_fold_list, X_test_fold_list, y_train_fold_list, y_test_fold_li
 
         histories = []
 
+        accuracies_per_fold = []
+        val_accuracies_per_fold = []
+        losses_per_fold = []
+        val_losses_per_fold = []
+
         for i, (train_ds_fold, val_ds_fold) in enumerate(datasets):
             model = tf.keras.models.clone_model(model_of_fold)
             model.set_weights(model_of_fold.get_weights())
@@ -218,6 +223,11 @@ def train(X_train_fold_list, X_test_fold_list, y_train_fold_list, y_test_fold_li
             _losses = history.history["loss"]
             _val_losses = history.history["val_loss"]
 
+            accuracies_per_fold.append(_accuracies)
+            val_accuracies_per_fold.append(_val_accuracies)
+            losses_per_fold.append(_losses)
+            val_losses_per_fold.append(_val_losses)
+
             for _acc, _val_acc, _loss, _val_loss in zip(_accuracies, _val_accuracies, _losses, _val_losses):
                 wandb.log({
                     f"accuracy_{i}": _acc,
@@ -226,25 +236,25 @@ def train(X_train_fold_list, X_test_fold_list, y_train_fold_list, y_test_fold_li
                     f"val_loss_{i}": _val_loss,
                 })
 
-        fold_train_accuracy = np.mean([h.history["accuracy"][-1] for h in histories])
-        fold_train_loss = np.mean([h.history["loss"][-1] for h in histories])
-        fold_val_accuracy = np.mean([h.history["val_accuracy"][-1] for h in histories])
-        fold_val_loss = np.mean([h.history["val_loss"][-1] for h in histories])
+        mean_accuracy_per_fold = np.mean(accuracies_per_fold, axis=0)
+        mean_val_accuracy_per_fold = np.mean(val_accuracies_per_fold, axis=0)
+        mean_loss_per_fold = np.mean(losses_per_fold, axis=0)
+        mean_val_loss_per_fold = np.mean(val_losses_per_fold, axis=0)
 
-        wandb.log({
-            "fold_accuracy": fold_train_accuracy,
-            "fold_val_accuracy": fold_val_accuracy,
-            "fold_loss": fold_train_loss,
-            "fold_val_loss": fold_val_loss
-        })
-
-        print(f"Hyperparameter Setting: Train Acc {fold_train_accuracy:.4f} - Train Loss {fold_train_loss:.4f} - "
-              f"Val Acc {fold_val_accuracy:.4f} - Val Loss {fold_val_loss}")
+        for _acc, _val_acc, _loss, _val_loss in zip(
+                mean_accuracy_per_fold, mean_val_accuracy_per_fold, mean_loss_per_fold, mean_val_loss_per_fold):
+            wandb.log({
+                "fold_accuracy": _acc,
+                "fold_val_accuracy": _val_acc,
+                "fold_loss": _loss,
+                "fold_val_loss": _val_loss,
+            })
 
         training_results.append(
             (
                 hparam_setting, histories,
-                fold_train_accuracy, fold_train_loss, fold_val_accuracy, fold_val_loss
+                mean_accuracy_per_fold[-1], mean_val_accuracy_per_fold[-1],
+                mean_loss_per_fold[-1], mean_val_loss_per_fold[-1]
             )
         )
 
