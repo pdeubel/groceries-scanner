@@ -1,5 +1,6 @@
 import os
-from typing import List, Tuple
+from datetime import datetime
+from typing import List
 
 import click
 import numpy as np
@@ -190,10 +191,10 @@ def get_optimizer(chosen_optimizer, lr):
     return optimizer
 
 
-def train_complete_dataset(X, y, num_classes, config_path=None):
+def train_complete_dataset(X, y, num_classes, config=None):
     (run, img_height, img_width,
      num_classes, batch_size, model, chosen_optimizer, lr,
-     epochs) = setup_model_and_start_logging(num_classes, config_path)
+     epochs) = setup_model_and_start_logging(num_classes, config)
 
     ds = create_tf_dataset(X, y, img_height, img_width, num_classes, batch_size)
     optimizer = get_optimizer(chosen_optimizer, lr)
@@ -208,6 +209,12 @@ def train_complete_dataset(X, y, num_classes, config_path=None):
         ds,
         epochs=epochs
     )
+
+    file_path = os.path.join("results", datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
+    os.makedirs(file_path)
+
+    if config["save_model"]:
+        model.save(os.path.join(file_path, "model"))
 
     return history
 
