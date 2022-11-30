@@ -13,3 +13,6 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# TensorFlow Lite models
+*.tflite
