@@ -291,10 +291,10 @@ def setup_model_and_start_logging(num_classes, config=None):
     return run, img_height, img_width, num_classes, batch_size, model_of_fold, chosen_optimizer, lr, epochs
 
 
-
 @click.command()
 @click.option("-c", "--config", "config_path", type=str, help="Path to a YAML training config")
-def main(config_path: str = None):
+@click.option("-d", "--directory", "model_dir", type=str, help="Path to a trained model")
+def main(config_path: str = None, model_dir: str = None):
     config = None
     if config_path is not None:
         with open(config_path, "r") as f:
@@ -302,8 +302,51 @@ def main(config_path: str = None):
 
     X, y, classes_to_id, id_to_classes, num_classes = load_dataset()
 
-    if config is not None and config["cross_val"] is False:
-        training_results = train_complete_dataset(X, y, num_classes, config)
+    training_results = None
+    if model_dir is not None:
+        model = tf.keras.models.load_model(model_dir)
+
+        with open("labels.txt", "r") as f:
+            labels = f.read().splitlines()
+
+        random_seed = 42
+
+        # Create a train and a test split
+        sss = StratifiedShuffleSplit(n_splits=1, test_size=0.2, random_state=random_seed)
+        X_train, X_test, y_train, y_test = None, None, None, None
+
+        for train_index, test_index in sss.split(X, y):
+            X_train, X_test = X[train_index], X[test_index]
+            y_train, y_test = y[train_index], y[test_index]
+
+        for idx in np.random.choice(len(X_train), size=25):
+            image_path = X_train[idx]
+            label = y_train[idx]
+
+            image = tf.keras.utils.load_img(image_path)
+            image = np.expand_dims(tf.keras.utils.img_to_array(image), axis=0)
+            image = tf.image.resize(image, (256, 256))
+            image = tf.keras.applications.mobilenet_v2.preprocess_input(image)
+            result = model.predict(image)
+
+            print(f"Label {label} predicted {labels[np.argmax(result[0])]} with probability {np.max(result[0])}")
+
+    elif config is not None and config["cross_val"] is False:
+        if config["train_full"] is True:
+            training_results = train_complete_dataset(X, y, num_classes, config)
+        else:
+            random_seed = 42
+
+            # Create a train and a test split
+            sss = StratifiedShuffleSplit(n_splits=1, test_size=0.2, random_state=random_seed)
+            X_train, X_test, y_train, y_test = None, None, None, None
+
+            for train_index, test_index in sss.split(X, y):
+                X_train, X_test = X[train_index], X[test_index]
+                y_train, y_test = y[train_index], y[test_index]
+
+            training_results = train_complete_dataset(X_train, y_train, num_classes, config)
+
     else:
         number_cv_splits = 5
         shuffle_cv = True
